@@ -12,5 +12,6 @@ public interface TransactionService {
 
     void transfer(TransferRequest request);
 
-    List<TransactionResponse> getHistory(Long accountId);
+    TransactionHistoryResponse getHistory(Long accountId);
+
 }

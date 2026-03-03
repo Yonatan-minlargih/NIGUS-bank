@@ -13,6 +13,7 @@ import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.math.BigDecimal;
 import java.util.List;
 import java.util.stream.Collectors;
 
@@ -25,9 +26,17 @@ public class TransactionServiceImpl implements TransactionService {
     private final TransactionRepository transactionRepository;
     private final AccountServiceClient accountClient;
 
+    // Temporarily disabled until JWT / SecurityContext is properly configured
+    private void validateAccountOwnership(Long accountId) {
+        // log.debug("Ownership check skipped for accountId: {}", accountId);
+        // When ready: uncomment getCurrentUserId() and real validation
+    }
+
     @Override
     @Transactional
     public TransactionResponse deposit(DepositRequest request) {
+        validateAccountOwnership(request.getAccountId());
+
         try {
             accountClient.credit(
                     request.getAccountId(),
@@ -35,24 +44,31 @@ public class TransactionServiceImpl implements TransactionService {
                     "Deposit" + (request.getDescription() != null ? " - " + request.getDescription() : "")
             );
 
-            Transaction tx = new Transaction();
-            tx.setAccountId(request.getAccountId());
-            tx.setAmount(request.getAmount());
-            tx.setType(Transaction.TransactionType.DEPOSIT);
-            tx.setCurrency(request.getCurrency());
-            tx.setDescription(request.getDescription());
+            Transaction tx = Transaction.builder()
+                    .accountId(request.getAccountId())
+                    .amount(request.getAmount())
+                    .type(Transaction.TransactionType.DEPOSIT)
+                    .currency(request.getCurrency() != null ? request.getCurrency() : "ETB")
+                    .description(request.getDescription())
+                    .build();
 
             transactionRepository.save(tx);
             return TransactionResponse.fromEntity(tx);
 
         } catch (FeignException e) {
+            log.error("Credit failed during deposit", e);
             throw new TransactionException("Failed to credit account: " + e.getMessage(), e);
+        } catch (Exception e) {
+            log.error("Unexpected error during deposit", e);
+            throw new TransactionException("Deposit operation failed", e);
         }
     }
 
     @Override
     @Transactional
     public TransactionResponse withdraw(WithdrawRequest request) {
+        validateAccountOwnership(request.getAccountId());
+
         try {
             accountClient.debit(
                     request.getAccountId(),
@@ -60,75 +76,103 @@ public class TransactionServiceImpl implements TransactionService {
                     "Withdrawal" + (request.getDescription() != null ? " - " + request.getDescription() : "")
             );
 
-            Transaction tx = new Transaction();
-            tx.setAccountId(request.getAccountId());
-            tx.setAmount(request.getAmount().negate());
-            tx.setType(Transaction.TransactionType.WITHDRAWAL);
-            tx.setCurrency(request.getCurrency());
-            tx.setDescription(request.getDescription());
+            Transaction tx = Transaction.builder()
+                    .accountId(request.getAccountId())
+                    .amount(request.getAmount().negate())
+                    .type(Transaction.TransactionType.WITHDRAWAL)
+                    .currency(request.getCurrency() != null ? request.getCurrency() : "ETB")
+                    .description(request.getDescription())
+                    .build();
 
             transactionRepository.save(tx);
             return TransactionResponse.fromEntity(tx);
 
         } catch (FeignException e) {
+            log.error("Debit failed during withdrawal", e);
             throw new TransactionException("Failed to debit account: " + e.getMessage(), e);
+        } catch (Exception e) {
+            log.error("Unexpected error during withdrawal", e);
+            throw new TransactionException("Withdrawal operation failed", e);
         }
     }
 
     @Override
     @Transactional
     public void transfer(TransferRequest request) {
+        validateAccountOwnership(request.getFromAccountId());
+
         Long from = request.getFromAccountId();
         Long to = request.getToAccountId();
         String desc = request.getDescription() != null ? request.getDescription() : "Transfer";
 
         try {
-            // 1. Debit source account (remote)
+            // 1. Debit source account
             accountClient.debit(from, request.getAmount(), "Transfer to " + to + " - " + desc);
 
-            // 2. Credit destination account (remote)
+            // 2. Credit destination account – with compensation on failure
             try {
                 accountClient.credit(to, request.getAmount(), "Transfer from " + from + " - " + desc);
             } catch (FeignException creditEx) {
-                log.error("Credit to destination failed after debit. Attempting compensation (credit back) - from={}, to={}, amount={}", from, to, request.getAmount());
-                // Attempt to undo the debit by crediting back the source
+                log.error("Credit to destination failed after debit succeeded", creditEx);
                 try {
-                    accountClient.credit(from, request.getAmount(), "Compensation for failed transfer to " + to + " - " + desc);
+                    // Compensation: credit back the source
+                    accountClient.credit(from, request.getAmount(), "Compensation - failed transfer to " + to);
+                    log.info("Compensation credit succeeded - source account restored");
                 } catch (Exception compEx) {
-                    // Compensation failed — this is a serious inconsistency, bubble up
-                    throw new TransactionException("Transfer failed and compensation also failed. Manual intervention required. creditEx=" + creditEx.getMessage() + ", compEx=" + compEx.getMessage(), compEx);
+                    log.error("Compensation credit also failed - manual reconciliation required", compEx);
+                    throw new TransactionException(
+                            "Critical: Transfer partially completed but compensation failed. Manual fix needed.", compEx);
                 }
-                throw new TransactionException("Failed to credit destination account: " + creditEx.getMessage(), creditEx);
+                throw new TransactionException("Transfer failed - destination credit unsuccessful", creditEx);
             }
 
-            // 3. Persist transaction records only after both remote operations succeeded
-            Transaction out = new Transaction();
-            out.setAccountId(from);
-            out.setAmount(request.getAmount().negate());
-            out.setType(Transaction.TransactionType.TRANSFER_OUT);
-            out.setCurrency(request.getCurrency());
-            out.setDescription(desc + " -> " + to);
+            // 3. Only after both remote calls succeed → save local records
+            Transaction out = Transaction.builder()
+                    .accountId(from)
+                    .amount(request.getAmount().negate())
+                    .type(Transaction.TransactionType.TRANSFER_OUT)
+                    .currency(request.getCurrency() != null ? request.getCurrency() : "ETB")
+                    .description(desc + " → " + to)
+                    .build();
             transactionRepository.save(out);
 
-            Transaction in = new Transaction();
-            in.setAccountId(to);
-            in.setAmount(request.getAmount());
-            in.setType(Transaction.TransactionType.TRANSFER_IN);
-            in.setCurrency(request.getCurrency());
-            in.setDescription(desc + " <- " + from);
+            Transaction in = Transaction.builder()
+                    .accountId(to)
+                    .amount(request.getAmount())
+                    .type(Transaction.TransactionType.TRANSFER_IN)
+                    .currency(request.getCurrency() != null ? request.getCurrency() : "ETB")
+                    .description(desc + " ← " + from)
+                    .build();
             transactionRepository.save(in);
 
         } catch (FeignException e) {
-            // network/remote failure
-            throw new TransactionException("Transfer failed due to remote call failure: " + e.getMessage(), e);
+            throw new TransactionException("Transfer failed due to communication error with account service", e);
         }
     }
 
     @Override
-    public List<TransactionResponse> getHistory(Long accountId) {
-        return transactionRepository.findByAccountId(accountId)
-                .stream()
+    public TransactionHistoryResponse getHistory(Long accountId) {
+        // validateAccountOwnership(accountId); // skipped for now
+
+        List<Transaction> transactions;
+        if (accountId != null) {
+            transactions = transactionRepository.findByAccountIdOrderByCreatedAtDesc(accountId);
+        } else {
+            transactions = transactionRepository.findAllByOrderByCreatedAtDesc();
+        }
+
+        List<TransactionResponse> transactionResponses = transactions.stream()
                 .map(TransactionResponse::fromEntity)
                 .collect(Collectors.toList());
+
+        // TODO: Fetch current balance from account service when accountId is provided
+        BigDecimal currentBalance = accountId != null ? BigDecimal.ZERO : null;
+
+        return TransactionHistoryResponse.builder()
+                .accountId(accountId)
+                .currentBalance(currentBalance)
+                .transactions(transactionResponses)
+                .totalCount(transactionResponses.size())
+                .build();
     }
 }
