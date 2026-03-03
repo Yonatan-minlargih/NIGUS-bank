@@ -22,20 +22,22 @@ spring:
     enabled: false
 
 server:
-  port: 5003
+  port: 8083
 
 # Local test convenience settings
 app:
   account:
-    local-stub: true    # enable LocalAccountService when true
+    local-stub: false   # enable LocalAccountService when true
   cors:
     allowed-origins: http://localhost:3000
 
-# Eureka is disabled for local runs
+# Eureka configuration
 eureka:
   client:
-    enabled: false
+    enabled: true
     service-url:
-      defaultZone: http://localhost:8761/eureka
-    register-with-eureka: false
-    fetch-registry: false
+      defaultZone: http://discovery-service:8761/eureka/
+    register-with-eureka: true
+    fetch-registry: true
+  instance:
+    prefer-ip-address: true
