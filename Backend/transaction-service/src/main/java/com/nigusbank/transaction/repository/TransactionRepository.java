@@ -7,4 +7,10 @@ import java.util.List;
 
 public interface TransactionRepository extends JpaRepository<Transaction, Long> {
     List<Transaction> findByAccountId(Long accountId);
+
+    // This method was missing → add it
+    List<Transaction> findByAccountIdOrderByCreatedAtDesc(Long accountId);
+    
+    // Method to get all transactions ordered by date
+    List<Transaction> findAllByOrderByCreatedAtDesc();
 }

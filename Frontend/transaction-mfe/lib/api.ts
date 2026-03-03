@@ -1,4 +1,4 @@
-const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5003'
+const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8080'
 
 class APIError extends Error {
   constructor(
@@ -30,7 +30,7 @@ const handleAPIResponse = async (response: Response) => {
 
 const getAuthHeaders = () => ({
   'Content-Type': 'application/json',
-  'Authorization': `Bearer ${localStorage.getItem('nigus_token') || localStorage.getItem('token') || ''}`,
+  'Authorization': `Bearer ${localStorage.getItem('token') || ''}`,
 })
 
 export interface Transaction {
@@ -91,7 +91,9 @@ export class TransactionAPI {
       const data = await handleAPIResponse(response)
       
       // Transform backend data to frontend format
-      return data.map((tx: any) => this.transformTransaction(tx))
+      // Backend now returns TransactionHistoryResponse with transactions field
+      const transactions = data.transactions || data
+      return transactions.map((tx: any) => this.transformTransaction(tx))
     } catch (error) {
       console.error('Error fetching transactions:', error)
       if (error instanceof APIError) {
@@ -117,10 +119,12 @@ export class TransactionAPI {
 
       const data = await handleAPIResponse(response)
       
-      const transactions = data.map((tx: any) => this.transformTransaction(tx))
+      // Backend now returns TransactionHistoryResponse with transactions field
+      const transactions = data.transactions || data
+      const transactionList = transactions.map((tx: any) => this.transformTransaction(tx))
       
       // Apply client-side filtering for date range, type, and amount range
-      return this.filterTransactionsClientSide(transactions, filters)
+      return this.filterTransactionsClientSide(transactionList, filters)
     } catch (error) {
       console.error('Error fetching filtered transactions:', error)
       if (error instanceof APIError) {
