@@ -1,0 +1,41 @@
+spring:
+  application:
+    name: transaction-service
+
+  datasource:
+    url: jdbc:mysql://localhost:3306/transaction_service?createDatabaseIfNotExist=true&useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=UTC
+    username: root
+    password: Amha4@kifle4@
+    driver-class-name: com.mysql.cj.jdbc.Driver
+
+  jpa:
+    hibernate:
+      ddl-auto: update          # ← Hibernate will create/update tables automatically
+    show-sql: true              # logs the SQL statements (very useful for debugging)
+    properties:
+      hibernate:
+        format_sql: true        # makes logged SQL more readable
+        dialect: org.hibernate.dialect.MySQLDialect   # optional but good practice
+
+  # Explicitly disable Flyway completely
+  flyway:
+    enabled: false
+
+server:
+  port: 5003
+
+# Local test convenience settings
+app:
+  account:
+    local-stub: true    # enable LocalAccountService when true
+  cors:
+    allowed-origins: http://localhost:3000
+
+# Eureka is disabled for local runs
+eureka:
+  client:
+    enabled: false
+    service-url:
+      defaultZone: http://localhost:8761/eureka
+    register-with-eureka: false
+    fetch-registry: false

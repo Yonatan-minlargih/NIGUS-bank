@@ -1,0 +1,46 @@
+server:
+  port: 5000
+
+spring:
+  application:
+    name: account_service
+
+  cloud:
+    discovery:
+      enabled: false
+    loadbalancer:
+      enabled: true                     # ← MUST be true
+
+  datasource:
+    url: jdbc:mysql://localhost:3306/account_service
+    username: mysql_user1
+    password: rootroot
+
+  jpa:
+    hibernate:
+      ddl-auto: update
+    properties:
+      hibernate:
+        dialect: org.hibernate.dialect.MySQLDialect
+
+jwt:
+  secret: my_super_secure_secret_key_for_jwt_2026_project_secure
+
+# ====================== Feign Configuration ======================
+user-service:                           # ← hyphen (not underscore)
+  url: http://localhost:5001
+
+feign:
+  client:
+    config:
+      default:
+        connectTimeout: 3000
+        readTimeout: 5000
+        loggerLevel: FULL
+
+# ====================== Disable Eureka (local dev) ======================
+eureka:
+  client:
+    enabled: false
+    fetch-registry: false
+    register-with-eureka: false

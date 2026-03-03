@@ -1,0 +1,28 @@
+server:
+  port: 8080
+
+spring:
+  security:
+    oauth2:
+      resourceserver:
+        jwt:
+          jwk-set-uri: http://localhost:8082/realms/nigus/protocol/openid-connect/certs
+
+spring:
+  cloud:
+    gateway:
+      routes:
+        - id: transaction
+          uri: lb://transaction-service
+          predicates:
+            - Path=/transactions/**
+          filters:
+            - RemoveRequestHeader=Cookie
+
+eureka:
+  client:
+    service-url:
+      defaultZone: http://localhost:8761/eureka
+    register-with-eureka: true
+    fetch-registry: true
+
